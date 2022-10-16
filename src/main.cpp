@@ -9,9 +9,11 @@
 #define DE_PIN 3
 
 // default values
-#define DEFAULT_SLAVE_ID 0
-#define DEFAULT_BAUD_RATE 9600
-#define FRESHWATER_DENSITY 977.0
+#define DEFAULT_SLAVE_ID 0x00
+#define DEFAULT_BAUD_RATE 0x02
+#define DEFAULT_FRESHWATER_DENSITY_WORD_1 0x4474
+#define DEFAULT_FRESHWATER_DENSITY_WORD_2 0x4000
+#define DEFAULT_UNIT_OF_MEASUREMENT 0x00
 
 // SI unit values
 #define PASCAL_UNIT 0x5061
@@ -30,43 +32,55 @@
 #define CUBIC_UNIT 0x5E33
 #define PER_SYMBOL 0x2F
 
-// Conversion values
-#define MILLIBAR_TO_PASCAL 100
-#define MILLIBAR_TO_PSI 0.0145037738
-#define METER_TO_FEET 3.280839895
-#define KGPM3_TO_LBPFT3 0.062427960576145
-#define LBPFT3_TO_KGPM3 16.01846337396
+// Conversion macros
+#define MILLIBAR_TO_PASCAL(pressure) (pressure * 100)
+#define MILLIBAR_TO_PSI(pressure) (pressure * 0.0145037738) 
+#define METER_TO_FEET(distance) (distance * 3.280839895)
+#define KGPM3_TO_LBPFT3(density) (density * 0.062427960576145)
+#define LBPFT3_TO_KGPM3(density) (density * 16.01846337396)
+#define CELSIUS_TO_FAHRENHEIT(temperature) (temperature * 1.8 + 32)
 
 // baud rates
 enum {
-  BAUD_RATE_1 = 2400,
-  BAUD_RATE_2 = 4800,
-  BAUD_RATE_3 = 9600,
-  BAUD_RATE_4 = 14400,
-  BAUD_RATE_5 = 19200,
-  BAUD_RATE_6 = 28800,
-  BAUD_RATE_7 = 38400,
-  BAUD_RATE_8 = 57600,
-  BAUD_RATE_9 = 76800,
-  BAUD_RATE_10 = 115200,
-  BAUD_RATE_11 = 230400,
-  BAUD_RATE_12 = 250000,
-  BAUD_RATE_13 = 500000,
-  BAUD_RATE_14 = 1000000,
-  BAUD_RATE_15 = 2000000,
+  BAUD_RATE_0 = 2400,
+  BAUD_RATE_1 = 4800,
+  BAUD_RATE_2 = 9600,
+  BAUD_RATE_3 = 14400,
+  BAUD_RATE_4 = 19200,
+  BAUD_RATE_5 = 28800,
+  BAUD_RATE_6 = 38400,
+  BAUD_RATE_7 = 57600,
+  BAUD_RATE_8 = 76800,
+  BAUD_RATE_9 = 115200,
+  BAUD_RATE_10 = 230400,
+  BAUD_RATE_11 = 250000,
+  BAUD_RATE_12 = 500000,
+  BAUD_RATE_13 = 1000000,
+  BAUD_RATE_14 = 2000000,
+};
+
+// EEPROM registers
+enum {
+  BAUD_RATE_EREG = 0x00,
+  SLAVE_ID_EREG = 0x01,
+  FLUID_DENSITY_WORD_1_EREG = 0x02,
+  FLUID_DENSITY_WORD_2_EREG = 0x04,
+  UNIT_OF_MEASUREMENT_ECOIL = 0x06,
 };
 
 // coil registers
 enum {
   RESET_COIL = 0x00,
   LOW_POWER_COIL = 0x01,
-  CONVERT_FLUID_DENSITY = 0x02,
-  SET_FLUID_DENSITY = 0x03,
-  SAVE_FLUID_DENSITY = 0x04,
+  CONVERT_FLUID_DENSITY_COIL = 0x02,
+  SET_FLUID_DENSITY_COIL = 0x03,
+  SAVE_FLUID_DENSITY_COIL = 0x04,
   UNIT_OF_MEASUREMENT_COIL = 0x05,
-  SAVE_UNIT_OF_MEASUREMENT = 0x06,
-  SAVE_BAUD_RATE = 0x07,
-  SAVE_SLAVE_ID = 0x08,
+  SAVED_UNIT_OF_MEASUREMENT_COIL = 0x06,
+  SAVE_UNIT_OF_MEASUREMENT_COIL = 0x07,
+  SAVE_BAUD_RATE_COIL = 0x08,
+  SAVE_SLAVE_ID_COIL = 0x09,
+  SAVE_DEFAULT_VALUES_COIL = 0x0A,
 };
 
 // input registers
@@ -88,6 +102,10 @@ enum {
   FLUID_DENSITY_UNIT_WORD_2_IREG = 0x0E,
   FLUID_DENSITY_UNIT_WORD_3_IREG = 0x0F,
   FLUID_DENSITY_UNIT_WORD_4_IREG = 0x10,
+  SAVED_BAUD_RATE_IREG = 0x11,
+  SAVED_SLAVE_ID_IREG = 0x12,
+  SAVED_FLUID_DENSITY_WORD_1_IREG = 0x13,
+  SAVED_FLUID_DENSITY_WORD_2_IREG = 0x14,
 };
 
 // holding registers
@@ -113,8 +131,8 @@ UInt16FloatUnion depth;
 UInt16FloatUnion temperature;
 UInt16FloatUnion altitude;
 
-uint16_t baudRate;
-uint16_t slaveId;
+uint8_t baudRate;
+uint8_t slaveId;
 UInt16FloatUnion fluidDensity;
 bool unitOfMeasurement = 0; 
 
@@ -154,7 +172,12 @@ uint8_t readCoil(uint8_t fc, uint16_t address, uint16_t length) {
     for (uint16_t i = 0; i < length; i++) {
       switch (address + i) {
         case UNIT_OF_MEASUREMENT_COIL:
-          slave.writeCoilToBuffer(i, unitOfMeasurement);
+          slave.writeCoilToBuffer(UNIT_OF_MEASUREMENT_COIL, unitOfMeasurement);
+          break;
+        case SAVED_UNIT_OF_MEASUREMENT_COIL:
+          bool eepromUnitOfMeasurement;
+          EEPROM.get(UNIT_OF_MEASUREMENT_ECOIL, eepromUnitOfMeasurement);
+          slave.writeCoilToBuffer(SAVED_UNIT_OF_MEASUREMENT_COIL, eepromUnitOfMeasurement);
           break;
       }  
     }
@@ -170,8 +193,8 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
       case UNIT_OF_MEASUREMENT_COIL:
         unitOfMeasurement = status;
         break;
-      case SAVE_UNIT_OF_MEASUREMENT:
-        // WARNING: USES EEPROM
+      case SAVE_UNIT_OF_MEASUREMENT_COIL:
+        if (status == 1) EEPROM.put(UNIT_OF_MEASUREMENT_ECOIL, unitOfMeasurement);
         break;
       case RESET_COIL:
         if (status == 1) reset();
@@ -179,20 +202,32 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
       case LOW_POWER_COIL:
         if (status == 1) lowPowerRS485();
         break;
-      case CONVERT_FLUID_DENSITY:
-        fluidDensity.dataFloat = (status == 0) ? fluidDensity.dataFloat * LBPFT3_TO_KGPM3 : fluidDensity.dataFloat * KGPM3_TO_LBPFT3;
+      case CONVERT_FLUID_DENSITY_COIL:
+        fluidDensity.dataFloat = (status == 0) ? LBPFT3_TO_KGPM3(fluidDensity.dataFloat) : KGPM3_TO_LBPFT3(fluidDensity.dataFloat);
         break;
-      case SET_FLUID_DENSITY:
+      case SET_FLUID_DENSITY_COIL:
         if (status == 1) sensor.setFluidDensity(fluidDensity.dataFloat);
         break;
-      case SAVE_FLUID_DENSITY:
-        // WARNING: USES EEPROM
+      case SAVE_FLUID_DENSITY_COIL:
+        if (status == 1) {
+          EEPROM.put(FLUID_DENSITY_WORD_1_EREG, fluidDensity.dataUInt16[1]);
+          EEPROM.put(FLUID_DENSITY_WORD_2_EREG, fluidDensity.dataUInt16[0]);
+        }
         break;
-      case SAVE_BAUD_RATE:
-        // WARNING: USES EEPROM
+      case SAVE_BAUD_RATE_COIL:
+        if (status == 1) EEPROM.put(BAUD_RATE_EREG, baudRate);
         break;
-      case SAVE_SLAVE_ID:
-        // WARNING: USES EEPROM
+      case SAVE_SLAVE_ID_COIL:
+        if (status == 1) EEPROM.put(SLAVE_ID_EREG, slaveId);
+        break;
+      case SAVE_DEFAULT_VALUES_COIL:
+        if (status == 1) {
+          EEPROM.put(BAUD_RATE_EREG, DEFAULT_BAUD_RATE);
+          EEPROM.put(SLAVE_ID_EREG, DEFAULT_SLAVE_ID);
+          EEPROM.put(FLUID_DENSITY_WORD_1_EREG, DEFAULT_FRESHWATER_DENSITY_WORD_1);
+          EEPROM.put(FLUID_DENSITY_WORD_2_EREG, DEFAULT_FRESHWATER_DENSITY_WORD_2);
+          EEPROM.put(UNIT_OF_MEASUREMENT_ECOIL, DEFAULT_UNIT_OF_MEASUREMENT);
+        }
         break;
     }
   }
@@ -204,10 +239,10 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
 uint8_t readRegister(uint8_t fc, uint16_t address, uint16_t length) {
   if (fc == FC_READ_INPUT_REGISTERS) {
     sensor.read();
-    pressure.dataFloat = (unitOfMeasurement == 0) ? sensor.pressure(MILLIBAR_TO_PASCAL) : sensor.pressure(MILLIBAR_TO_PSI);
-    temperature.dataFloat = (unitOfMeasurement == 0) ? sensor.temperature() : sensor.temperature() * 1.8 + 32;
-    depth.dataFloat = (unitOfMeasurement == 0) ? sensor.depth() : sensor.depth() * METER_TO_FEET;
-    altitude.dataFloat = (unitOfMeasurement == 0) ? sensor.altitude() : sensor.altitude() * METER_TO_FEET;
+    pressure.dataFloat = (unitOfMeasurement == 0) ? MILLIBAR_TO_PASCAL(sensor.pressure()) : MILLIBAR_TO_PSI(sensor.pressure());
+    temperature.dataFloat = (unitOfMeasurement == 0) ? sensor.temperature() : CELSIUS_TO_FAHRENHEIT(sensor.temperature());
+    depth.dataFloat = (unitOfMeasurement == 0) ? sensor.depth() : METER_TO_FEET(sensor.depth());
+    altitude.dataFloat = (unitOfMeasurement == 0) ? sensor.altitude() : METER_TO_FEET(sensor.altitude());
     for (uint16_t i = 0; i < length; i++) {
       switch (address + i) {
         case PRESSURE_WORD_1_IREG:
@@ -267,6 +302,26 @@ uint8_t readRegister(uint8_t fc, uint16_t address, uint16_t length) {
         case FLUID_DENSITY_UNIT_WORD_4_IREG:
           slave.writeRegisterToBuffer(FLUID_DENSITY_UNIT_WORD_4_IREG, CUBIC_UNIT);
           break;
+        case SAVED_BAUD_RATE_IREG:
+          uint8_t eepromBaudRate;
+          EEPROM.get(BAUD_RATE_EREG, eepromBaudRate);
+          slave.writeRegisterToBuffer(SAVED_BAUD_RATE_IREG, eepromBaudRate);
+          break;
+        case SAVED_SLAVE_ID_IREG:
+          uint8_t eepromSlaveId;
+          EEPROM.get(SLAVE_ID_EREG, slaveId);
+          slave.writeRegisterToBuffer(SAVED_SLAVE_ID_IREG, eepromSlaveId);
+          break;
+        case SAVED_FLUID_DENSITY_WORD_1_IREG:
+          uint16_t eepromFluidDensityWord1;
+          EEPROM.get(FLUID_DENSITY_WORD_1_EREG, eepromFluidDensityWord1);
+          slave.writeRegisterToBuffer(SAVED_FLUID_DENSITY_WORD_1_IREG, eepromFluidDensityWord1);
+          break;
+        case SAVED_FLUID_DENSITY_WORD_2_IREG:
+          uint16_t eepromFluidDensityWord2;
+          EEPROM.get(FLUID_DENSITY_WORD_2_EREG, eepromFluidDensityWord2);
+          slave.writeRegisterToBuffer(SAVED_FLUID_DENSITY_WORD_2_IREG, eepromFluidDensityWord2);
+          break;
       } 
     }
   }
@@ -305,15 +360,10 @@ uint8_t writeRegister(uint8_t fc, uint16_t address, uint16_t length) {
           slaveId = slave.readRegisterFromBuffer(SLAVE_ID_HREG);
           break;
         case FLUID_DENSITY_WORD_1_HREG:
-          // fluidDensity.dataUInt16[1] = slave.readRegisterFromBuffer(FLUID_DENSITY_WORD_1_HREG);
-          uint16_t eepromData = 0;
-          EEPROM.get(FLUID_DENSITY_WORD_1_HREG, eepromData);
-          if (eepromData == 0) fluidDensity.dataUInt16[1] = 0;
+          fluidDensity.dataUInt16[1] = slave.readRegisterFromBuffer(FLUID_DENSITY_WORD_1_HREG);
           break;
         case FLUID_DENSITY_WORD_2_HREG:
-          // fluidDensity.dataUInt16[0] = slave.readRegisterFromBuffer(FLUID_DENSITY_WORD_2_HREG);
-          // EEPROM.get(FLUID_DENSITY_WORD_2_HREG, fluidDensity.dataUInt16[0]);
-          // if (fluidDensity.dataUInt16[0] == 0) fluidDensity.dataUInt16[0] = 420;
+          fluidDensity.dataUInt16[0] = slave.readRegisterFromBuffer(FLUID_DENSITY_WORD_2_HREG);
           break;
       }
     }
@@ -323,12 +373,69 @@ uint8_t writeRegister(uint8_t fc, uint16_t address, uint16_t length) {
 }
 
 void setup() {
+  // get EEPROM data
+  EEPROM.get(BAUD_RATE_EREG, baudRate);
+  EEPROM.get(SLAVE_ID_EREG, slaveId);
+  EEPROM.get(FLUID_DENSITY_WORD_1_EREG, fluidDensity.dataUInt16[1]);
+  EEPROM.get(FLUID_DENSITY_WORD_2_EREG, fluidDensity.dataUInt16[0]);
+  EEPROM.get(UNIT_OF_MEASUREMENT_ECOIL, unitOfMeasurement);
   // setting pins
   pinMode(RE_PIN, OUTPUT);
   pinMode(DE_PIN, OUTPUT);
   // set baud rate
-  Serial.begin(DEFAULT_BAUD_RATE);
-  slave.begin(DEFAULT_BAUD_RATE);
+  uint32_t realBaudRate;
+  switch (baudRate) {
+  case 0:
+    realBaudRate = BAUD_RATE_0;
+    break;
+  case 1:
+    realBaudRate = BAUD_RATE_1;
+    break;
+  case 2:
+    realBaudRate = BAUD_RATE_2;
+    break;
+  case 3:
+    realBaudRate = BAUD_RATE_3;
+    break;
+  case 4:
+    realBaudRate = BAUD_RATE_4;
+    break;
+  case 5:
+    realBaudRate = BAUD_RATE_5;
+    break;
+  case 6:
+    realBaudRate = BAUD_RATE_6;
+    break;
+  case 7:
+    realBaudRate = BAUD_RATE_7;
+    break;
+  case 8:
+    realBaudRate = BAUD_RATE_8;
+    break;
+  case 9:
+    realBaudRate = BAUD_RATE_9;
+    break;
+  case 10:
+    realBaudRate = BAUD_RATE_10;
+    break;
+  case 11:
+    realBaudRate = BAUD_RATE_11;
+    break;
+  case 12:
+    realBaudRate = BAUD_RATE_12;
+    break;
+  case 13:
+    realBaudRate = BAUD_RATE_13;
+    break;
+  case 14:
+    realBaudRate = BAUD_RATE_14;
+    break;
+  default:
+    realBaudRate = BAUD_RATE_2;
+    break;
+  }
+  Serial.begin(realBaudRate);
+  slave.begin(realBaudRate);
   // initialize
   Wire.begin();
   while(!sensor.init()) {
@@ -338,7 +445,7 @@ void setup() {
   receiveRS485();
   // sensor config
   sensor.setModel(MS5837::MS5837_30BA);
-  sensor.setFluidDensity(FRESHWATER_DENSITY);
+  sensor.setFluidDensity(fluidDensity.dataFloat);
   // setting registers
   slave.cbVector[CB_READ_COILS] = readCoil;
   slave.cbVector[CB_WRITE_COIL] = writeCoil;
