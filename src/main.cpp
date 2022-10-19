@@ -3,10 +3,14 @@
 #include <Wire.h>
 #include <MS5837.h>
 #include <ModbusSlave.h>
+#include <Adafruit_SleepyDog.h>
+#include <avr/power.h>
 
 // RS485 control gpios
 #define RE_PIN 2
 #define DE_PIN 3
+
+#define WAKE_UP_PIN 0
 
 // Default values
 #define DEFAULT_SLAVE_ID 0x0000
@@ -77,7 +81,7 @@ enum {
 // Coil registers
 enum {
   RESET_COIL = 0x00,
-  LOW_POWER_COIL = 0x01,
+  POWER_MODE_COIL = 0x01,
   SAVE_BAUD_RATE_COIL = 0x02,
   SAVE_SLAVE_ID_COIL = 0x03,
   UNIT_OF_MEASUREMENT_COIL = 0x04,
@@ -150,6 +154,7 @@ uint8_t slaveId;
 UInt16FloatUnion fluidDensity;
 UInt16FloatUnion pressureDrift;
 bool unitOfMeasurement = 0; 
+bool powerMode = 0;
 
 MS5837 sensor;
 Modbus *slave;
@@ -170,10 +175,66 @@ void lowPowerRS485() {
   digitalWrite(RE_PIN, HIGH);
   digitalWrite(DE_PIN, LOW);
   delayMicroseconds(1);
-  receiveRS485();
 }
 
-// serial print through RS485
+uint32_t getActualBaudRate(uint8_t baudRateIdentifier) {
+  uint32_t realBaudRate;
+
+  switch (baudRateIdentifier) {
+    case 0:
+      realBaudRate = BAUD_RATE_0;
+      break;
+    case 1:
+      realBaudRate = BAUD_RATE_1;
+      break;
+    case 2:
+      realBaudRate = BAUD_RATE_2;
+      break;
+    case 3:
+      realBaudRate = BAUD_RATE_3;
+      break;
+    case 4:
+      realBaudRate = BAUD_RATE_4;
+      break;
+    case 5:
+      realBaudRate = BAUD_RATE_5;
+      break;
+    case 6:
+      realBaudRate = BAUD_RATE_6;
+      break;
+    case 7:
+      realBaudRate = BAUD_RATE_7;
+      break;
+    case 8:
+      realBaudRate = BAUD_RATE_8;
+      break;
+    case 9:
+      realBaudRate = BAUD_RATE_9;
+      break;
+    case 10:
+      realBaudRate = BAUD_RATE_10;
+      break;
+    case 11:
+      realBaudRate = BAUD_RATE_11;
+      break;
+    case 12:
+      realBaudRate = BAUD_RATE_12;
+      break;
+    case 13:
+      realBaudRate = BAUD_RATE_13;
+      break;
+    case 14:
+      realBaudRate = BAUD_RATE_14;
+      break;
+    default:
+      realBaudRate = BAUD_RATE_2;
+      break;
+  }
+
+  return realBaudRate;
+}
+
+// Serial print through RS485
 size_t logRS485(const char *message) {
   transmitRS485();
   size_t n = Serial.println(message);
@@ -181,11 +242,13 @@ size_t logRS485(const char *message) {
   return n;
 }
 
-// read data from the coils
+// Read data from the coils
 uint8_t readCoil(uint8_t fc, uint16_t address, uint16_t length) {
   if (fc == FC_READ_COILS) {
     for (uint16_t i = 0; i < length; i++) {
       switch (address + i) {
+        case POWER_MODE_COIL:
+          slave->writeCoilToBuffer(POWER_MODE_COIL, powerMode);
         case UNIT_OF_MEASUREMENT_COIL:
           slave->writeCoilToBuffer(UNIT_OF_MEASUREMENT_COIL, unitOfMeasurement);
           break;
@@ -201,15 +264,23 @@ uint8_t readCoil(uint8_t fc, uint16_t address, uint16_t length) {
   return STATUS_OK;
 }
 
-// write data to the coils.
+// Write data to the coils.
 uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
   if (fc == FC_WRITE_COIL) {
     switch (address) {
       case RESET_COIL:
         if (status == 1) reset();
         break;
-      case LOW_POWER_COIL:
-        if (status == 1) lowPowerRS485();
+      case POWER_MODE_COIL:
+        if (status == 1 && powerMode == 0) {
+          Wire.end();
+          power_twi_disable();
+          powerMode = 1;
+        } else if (status == 0 && powerMode == 1) {
+          power_twi_enable();
+          Wire.begin();
+          powerMode = 0;
+        }
         break;
       case SAVE_BAUD_RATE_COIL:
         if (status == 1) EEPROM.put(BAUD_RATE_EREG, baudRate);
@@ -269,9 +340,9 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
   return STATUS_OK;
 }
 
-// read data from the registers
+// Read data from the registers
 uint8_t readRegister(uint8_t fc, uint16_t address, uint16_t length) {
-  if (fc == FC_READ_INPUT_REGISTERS) {
+  if (fc == FC_READ_INPUT_REGISTERS && powerMode == 0) {
     sensor.read();
     pressure.dataFloat = (unitOfMeasurement == 0) ? MILLIBAR_TO_PASCAL(sensor.pressure()) + pressureDrift.dataFloat : MILLIBAR_TO_PSI(sensor.pressure()) + pressureDrift.dataFloat;
     temperature.dataFloat = (unitOfMeasurement == 0) ? sensor.temperature() : CELSIUS_TO_FAHRENHEIT(sensor.temperature());
@@ -405,7 +476,7 @@ uint8_t readRegister(uint8_t fc, uint16_t address, uint16_t length) {
   return STATUS_OK;
 }
 
-// write data to the registers.
+// Write data to the registers.
 uint8_t writeRegister(uint8_t fc, uint16_t address, uint16_t length) {
   if (fc == FC_WRITE_MULTIPLE_REGISTERS) {
     for (uint16_t i = 0; i < length; i++) {
@@ -436,7 +507,13 @@ uint8_t writeRegister(uint8_t fc, uint16_t address, uint16_t length) {
 }
 
 void setup() {
-  // get EEPROM data
+  // Disable unused features
+  ADCSRA = 0;
+  power_adc_disable();
+  power_spi_disable();
+  power_timer1_disable();
+  power_timer2_disable();
+  // Get EEPROM data
   EEPROM.get(BAUD_RATE_EREG, baudRate);
   EEPROM.get(SLAVE_ID_EREG, slaveId);
   EEPROM.get(FLUID_DENSITY_WORD_1_EREG, fluidDensity.dataUInt16[1]);
@@ -444,74 +521,23 @@ void setup() {
   EEPROM.get(UNIT_OF_MEASUREMENT_ECOIL, unitOfMeasurement);
   EEPROM.get(PRESSURE_DRIFT_WORD_1_EREG, pressureDrift.dataUInt16[1]);
   EEPROM.get(PRESSURE_DRIFT_WORD_2_EREG, pressureDrift.dataUInt16[0]);
-  // setting pins
+  // Setting pins
   pinMode(RE_PIN, OUTPUT);
   pinMode(DE_PIN, OUTPUT);
-  // set baud rate
-  uint32_t realBaudRate;
-  switch (baudRate) {
-  case 0:
-    realBaudRate = BAUD_RATE_0;
-    break;
-  case 1:
-    realBaudRate = BAUD_RATE_1;
-    break;
-  case 2:
-    realBaudRate = BAUD_RATE_2;
-    break;
-  case 3:
-    realBaudRate = BAUD_RATE_3;
-    break;
-  case 4:
-    realBaudRate = BAUD_RATE_4;
-    break;
-  case 5:
-    realBaudRate = BAUD_RATE_5;
-    break;
-  case 6:
-    realBaudRate = BAUD_RATE_6;
-    break;
-  case 7:
-    realBaudRate = BAUD_RATE_7;
-    break;
-  case 8:
-    realBaudRate = BAUD_RATE_8;
-    break;
-  case 9:
-    realBaudRate = BAUD_RATE_9;
-    break;
-  case 10:
-    realBaudRate = BAUD_RATE_10;
-    break;
-  case 11:
-    realBaudRate = BAUD_RATE_11;
-    break;
-  case 12:
-    realBaudRate = BAUD_RATE_12;
-    break;
-  case 13:
-    realBaudRate = BAUD_RATE_13;
-    break;
-  case 14:
-    realBaudRate = BAUD_RATE_14;
-    break;
-  default:
-    realBaudRate = BAUD_RATE_2;
-    break;
-  }
-  slave = &Modbus(Serial, slaveId, RE_PIN, DE_PIN);
-  Serial.begin(realBaudRate);
-  slave->begin(realBaudRate);
-  // initialize
+  slave = new Modbus(Serial, slaveId, RE_PIN, DE_PIN);
+  // Set baud rate
+  Serial.begin(getActualBaudRate(baudRate));
+  slave->begin(getActualBaudRate(baudRate));
+  // Initialize
   Wire.begin();
   while(!sensor.init()) {
     logRS485("Error: Sensor initialization failed.");
     delay(3000);
   };
   receiveRS485();
-  // sensor config
+  // Sensor config
   sensor.setModel(MS5837::MS5837_30BA);
-  // setting registers
+  // Setting registers
   slave->cbVector[CB_READ_COILS] = readCoil;
   slave->cbVector[CB_WRITE_COIL] = writeCoil;
   slave->cbVector[CB_READ_REGISTERS] = readRegister;
@@ -520,4 +546,10 @@ void setup() {
 
 void loop() {  
   slave->poll();
+  if (powerMode == 1) {
+    lowPowerRS485();
+    uint16_t sleepTime = Watchdog.sleep(8000);
+    receiveRS485();
+    for (uint8_t i = 0; i < 10; i ++) slave->poll();
+  }
 }
