@@ -1,3 +1,10 @@
+/*
+  Name: AHole-PT50 Sensor Firmware
+  Description: A RS485 Modbus firmware for MS5837-30BA pressure and temperature sensor IC.
+  Author: Kyle Aranas
+  License: Commercial
+*/
+
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <Wire.h>
@@ -10,8 +17,6 @@
 #define RE_PIN 2
 #define DE_PIN 3
 
-#define WAKE_UP_PIN 0
-
 // Default values
 #define DEFAULT_SLAVE_ID 0x0000
 #define DEFAULT_BAUD_RATE 0x0002
@@ -20,6 +25,7 @@
 #define DEFAULT_UNIT_OF_MEASUREMENT 0x0000
 #define DEFAULT_PRESSURE_DRIFT_WORD_1 0x0000
 #define DEFAULT_PRESSURE_DRIFT_WORD_2 0x0000
+#define DEFAULT_WAKE_UP_TIME_WINDOW 2000
 
 // SI unit values
 #define PASCAL_UNIT 0x5061
@@ -76,6 +82,7 @@ enum {
   FLUID_DENSITY_WORD_2_EREG = 0x05,
   PRESSURE_DRIFT_WORD_1_EREG = 0x07,
   PRESSURE_DRIFT_WORD_2_EREG = 0x09,
+  WAKE_UP_TIME_WINDOW_EREG = 0x0B,
 };
 
 // Coil registers
@@ -91,8 +98,9 @@ enum {
   SAVE_FLUID_DENSITY_COIL = 0x08,
   CONVERT_PRESSURE_DRIFT_COIL = 0x09,
   SAVE_PRESSURE_DRIFT_COIL = 0x0A,
-  SET_DEFAULT_VALUES_COIL = 0x0B,
-  SAVE_DEFAULT_VALUES_COIL = 0x0C,
+  SAVE_WAKE_UP_TIME_WINDOW_COIL = 0x0B,
+  SET_DEFAULT_VALUES_COIL = 0x0C,
+  SAVE_DEFAULT_VALUES_COIL = 0x0D,
 };
 
 // Input registers
@@ -132,6 +140,7 @@ enum {
   FLUID_DENSITY_WORD_2_HREG = 0x03,
   PRESSURE_DRIFT_WORD_1_HREG = 0x04,
   PRESSURE_DRIFT_WORD_2_HREG = 0x05,
+  WAKE_UP_TIME_WINDOW_HREG = 0x06,
 };
 
 union UInt16FloatUnion {
@@ -148,11 +157,13 @@ UInt16FloatUnion pressure;
 UInt16FloatUnion depth;
 UInt16FloatUnion temperature;
 UInt16FloatUnion altitude;
-
-uint8_t baudRate;
-uint8_t slaveId;
 UInt16FloatUnion fluidDensity;
 UInt16FloatUnion pressureDrift;
+
+uint16_t wakeUpTimeWindow;
+uint8_t baudRate;
+uint8_t slaveId;
+
 bool unitOfMeasurement = 0; 
 bool powerMode = 0;
 
@@ -177,6 +188,7 @@ void lowPowerRS485() {
   delayMicroseconds(1);
 }
 
+// Get the corresponding baud rate.
 uint32_t getActualBaudRate(uint8_t baudRateIdentifier) {
   uint32_t realBaudRate;
 
@@ -312,6 +324,9 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
           EEPROM.put(PRESSURE_DRIFT_WORD_2_EREG, pressureDrift.dataUInt16[0]);
         }
         break;
+      case SAVE_WAKE_UP_TIME_WINDOW_COIL:
+        if (status == 1) EEPROM.put(WAKE_UP_TIME_WINDOW_EREG, wakeUpTimeWindow);
+        break;
       case SET_DEFAULT_VALUES_COIL:
         if (status == 1) {
           baudRate = DEFAULT_BAUD_RATE;
@@ -321,6 +336,7 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
           unitOfMeasurement = DEFAULT_UNIT_OF_MEASUREMENT;
           pressureDrift.dataUInt16[1] = DEFAULT_PRESSURE_DRIFT_WORD_1;
           pressureDrift.dataUInt16[0] = DEFAULT_PRESSURE_DRIFT_WORD_2;
+          wakeUpTimeWindow = DEFAULT_WAKE_UP_TIME_WINDOW;
         }
         break;
       case SAVE_DEFAULT_VALUES_COIL:
@@ -332,6 +348,7 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
           EEPROM.put(UNIT_OF_MEASUREMENT_ECOIL, DEFAULT_UNIT_OF_MEASUREMENT);
           EEPROM.put(PRESSURE_DRIFT_WORD_1_EREG, DEFAULT_PRESSURE_DRIFT_WORD_1);
           EEPROM.put(PRESSURE_DRIFT_WORD_2_EREG, DEFAULT_PRESSURE_DRIFT_WORD_2);
+          EEPROM.put(WAKE_UP_TIME_WINDOW_EREG, DEFAULT_WAKE_UP_TIME_WINDOW);
         }
         break;
     }
@@ -469,6 +486,9 @@ uint8_t readRegister(uint8_t fc, uint16_t address, uint16_t length) {
         case PRESSURE_DRIFT_WORD_2_HREG:
           slave->writeRegisterToBuffer(PRESSURE_DRIFT_WORD_2_HREG, pressureDrift.dataUInt16[0]);
           break;
+        case WAKE_UP_TIME_WINDOW_HREG:
+          slave->writeRegisterToBuffer(WAKE_UP_TIME_WINDOW_HREG, wakeUpTimeWindow);
+          break;
       }
     }
   }
@@ -499,6 +519,9 @@ uint8_t writeRegister(uint8_t fc, uint16_t address, uint16_t length) {
         case PRESSURE_DRIFT_WORD_2_HREG:
           pressureDrift.dataUInt16[0] = slave->readRegisterFromBuffer(PRESSURE_DRIFT_WORD_2_HREG);
           break;
+        case WAKE_UP_TIME_WINDOW_HREG:
+          wakeUpTimeWindow = slave->readRegisterFromBuffer(WAKE_UP_TIME_WINDOW_HREG);
+          break;
       }
     }
   }
@@ -521,6 +544,7 @@ void setup() {
   EEPROM.get(UNIT_OF_MEASUREMENT_ECOIL, unitOfMeasurement);
   EEPROM.get(PRESSURE_DRIFT_WORD_1_EREG, pressureDrift.dataUInt16[1]);
   EEPROM.get(PRESSURE_DRIFT_WORD_2_EREG, pressureDrift.dataUInt16[0]);
+  EEPROM.get(WAKE_UP_TIME_WINDOW_EREG, wakeUpTimeWindow);
   // Setting pins
   pinMode(RE_PIN, OUTPUT);
   pinMode(DE_PIN, OUTPUT);
@@ -550,6 +574,6 @@ void loop() {
     lowPowerRS485();
     uint16_t sleepTime = Watchdog.sleep(8000);
     receiveRS485();
-    for (uint8_t i = 0; i < 10; i ++) slave->poll();
+    for (uint16_t start = millis(); millis() - start < wakeUpTimeWindow;) slave->poll();
   }
 }
