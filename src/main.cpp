@@ -1,6 +1,7 @@
 /*
   Name: AHole-PT50 Sensor Firmware
-  Description: A RS485 Modbus firmware for MS5837-30BA pressure and temperature sensor IC.
+  Description: A RS485 Modbus firmware for MS5837-30BA pressure 
+               and temperature sensor IC.
   Author: Kyle Aranas
   License: Commercial
 */
@@ -17,12 +18,15 @@
 #define RE_PIN 2
 #define DE_PIN 3
 
+// Serial number of the device.
+#define SERIAL_NUMBER "69-420"
+
 // Default values
-#define DEFAULT_SLAVE_ID 0x0000
-#define DEFAULT_BAUD_RATE 0x0002
+#define DEFAULT_SLAVE_ID 0
+#define DEFAULT_BAUD_RATE 2
 #define DEFAULT_FRESHWATER_DENSITY_WORD_1 0x4474
 #define DEFAULT_FRESHWATER_DENSITY_WORD_2 0x4000
-#define DEFAULT_UNIT_OF_MEASUREMENT 0x0000
+#define DEFAULT_UNIT_OF_MEASUREMENT 0
 #define DEFAULT_PRESSURE_DRIFT_WORD_1 0x0000
 #define DEFAULT_PRESSURE_DRIFT_WORD_2 0x0000
 #define DEFAULT_WAKE_UP_TIME_WINDOW 2000
@@ -129,7 +133,9 @@ enum {
   SAVED_FLUID_DENSITY_WORD_1_IREG = 0x15,
   SAVED_FLUID_DENSITY_WORD_2_IREG = 0x16,
   SAVED_PRESSURE_DRIFT_WORD_1_IREG = 0x17,
-  SAVED_PRESSURE_DRIFT_WORD_2_IREG = 0x19,
+  SAVED_PRESSURE_DRIFT_WORD_2_IREG = 0x18,
+  SAVED_WAKE_UP_TIME_WINDOW_IREG = 0x19,
+  SERIAL_NUMBER_IREG = 0x1A,
 };
 
 // Holding registers
@@ -146,11 +152,6 @@ enum {
 union UInt16FloatUnion {
   uint16_t dataUInt16[2];
   float dataFloat;
-};
-
-union UInt16UInt32Union {
-  uint16_t dataUInt16[2];
-  uint32_t dataUInt32;
 };
 
 UInt16FloatUnion pressure;
@@ -261,12 +262,13 @@ uint8_t readCoil(uint8_t fc, uint16_t address, uint16_t length) {
       switch (address + i) {
         case POWER_MODE_COIL:
           slave->writeCoilToBuffer(POWER_MODE_COIL, powerMode);
+          break;
         case UNIT_OF_MEASUREMENT_COIL:
           slave->writeCoilToBuffer(UNIT_OF_MEASUREMENT_COIL, unitOfMeasurement);
           break;
         case SAVED_UNIT_OF_MEASUREMENT_COIL:
           bool eepromUnitOfMeasurement;
-          EEPROM.get(SAVED_UNIT_OF_MEASUREMENT_COIL, eepromUnitOfMeasurement);
+          EEPROM.get(UNIT_OF_MEASUREMENT_ECOIL, eepromUnitOfMeasurement);
           slave->writeCoilToBuffer(SAVED_UNIT_OF_MEASUREMENT_COIL, eepromUnitOfMeasurement);
           break;
       }  
@@ -331,9 +333,9 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
         if (status == 1) {
           baudRate = DEFAULT_BAUD_RATE;
           slaveId = DEFAULT_SLAVE_ID;
+          unitOfMeasurement = DEFAULT_UNIT_OF_MEASUREMENT;
           fluidDensity.dataUInt16[1] = DEFAULT_FRESHWATER_DENSITY_WORD_1;
           fluidDensity.dataUInt16[0] = DEFAULT_FRESHWATER_DENSITY_WORD_2;
-          unitOfMeasurement = DEFAULT_UNIT_OF_MEASUREMENT;
           pressureDrift.dataUInt16[1] = DEFAULT_PRESSURE_DRIFT_WORD_1;
           pressureDrift.dataUInt16[0] = DEFAULT_PRESSURE_DRIFT_WORD_2;
           wakeUpTimeWindow = DEFAULT_WAKE_UP_TIME_WINDOW;
@@ -343,9 +345,9 @@ uint8_t writeCoil(uint8_t fc, uint16_t address, uint16_t status) {
         if (status == 1) {
           EEPROM.put(BAUD_RATE_EREG, DEFAULT_BAUD_RATE);
           EEPROM.put(SLAVE_ID_EREG, DEFAULT_SLAVE_ID);
+          EEPROM.put(UNIT_OF_MEASUREMENT_ECOIL, DEFAULT_UNIT_OF_MEASUREMENT);
           EEPROM.put(FLUID_DENSITY_WORD_1_EREG, DEFAULT_FRESHWATER_DENSITY_WORD_1);
           EEPROM.put(FLUID_DENSITY_WORD_2_EREG, DEFAULT_FRESHWATER_DENSITY_WORD_2);
-          EEPROM.put(UNIT_OF_MEASUREMENT_ECOIL, DEFAULT_UNIT_OF_MEASUREMENT);
           EEPROM.put(PRESSURE_DRIFT_WORD_1_EREG, DEFAULT_PRESSURE_DRIFT_WORD_1);
           EEPROM.put(PRESSURE_DRIFT_WORD_2_EREG, DEFAULT_PRESSURE_DRIFT_WORD_2);
           EEPROM.put(WAKE_UP_TIME_WINDOW_EREG, DEFAULT_WAKE_UP_TIME_WINDOW);
@@ -452,14 +454,22 @@ uint8_t readRegister(uint8_t fc, uint16_t address, uint16_t length) {
           slave->writeRegisterToBuffer(SAVED_FLUID_DENSITY_WORD_2_IREG, eepromFluidDensityWord2);
           break;
         case SAVED_PRESSURE_DRIFT_WORD_1_IREG:
-          int16_t eepromPressureDriftWord1;
+          uint16_t eepromPressureDriftWord1;
           EEPROM.get(PRESSURE_DRIFT_WORD_1_EREG, eepromPressureDriftWord1);
           slave->writeRegisterToBuffer(SAVED_PRESSURE_DRIFT_WORD_1_IREG, eepromPressureDriftWord1);
           break;
         case SAVED_PRESSURE_DRIFT_WORD_2_IREG:
-          int16_t eepromPressureDriftWord2;
+          uint16_t eepromPressureDriftWord2;
           EEPROM.get(PRESSURE_DRIFT_WORD_2_EREG, eepromPressureDriftWord2);
           slave->writeRegisterToBuffer(SAVED_PRESSURE_DRIFT_WORD_2_IREG, eepromPressureDriftWord2);
+          break;
+        case SAVED_WAKE_UP_TIME_WINDOW_IREG:
+          uint16_t eepromWakeUpTimeWindow;
+          EEPROM.get(WAKE_UP_TIME_WINDOW_EREG, eepromWakeUpTimeWindow);
+          slave->writeRegisterToBuffer(SAVED_WAKE_UP_TIME_WINDOW_IREG, eepromWakeUpTimeWindow);
+          break;
+        case SERIAL_NUMBER_IREG:
+          for (uint8_t i = 0; i < sizeof(SERIAL_NUMBER) - 1; i++) slave->writeRegisterToBuffer(SERIAL_NUMBER_IREG + i, SERIAL_NUMBER[i]);
           break;
       } 
     }
@@ -539,9 +549,9 @@ void setup() {
   // Get EEPROM data
   EEPROM.get(BAUD_RATE_EREG, baudRate);
   EEPROM.get(SLAVE_ID_EREG, slaveId);
+  EEPROM.get(UNIT_OF_MEASUREMENT_ECOIL, unitOfMeasurement);
   EEPROM.get(FLUID_DENSITY_WORD_1_EREG, fluidDensity.dataUInt16[1]);
   EEPROM.get(FLUID_DENSITY_WORD_2_EREG, fluidDensity.dataUInt16[0]);
-  EEPROM.get(UNIT_OF_MEASUREMENT_ECOIL, unitOfMeasurement);
   EEPROM.get(PRESSURE_DRIFT_WORD_1_EREG, pressureDrift.dataUInt16[1]);
   EEPROM.get(PRESSURE_DRIFT_WORD_2_EREG, pressureDrift.dataUInt16[0]);
   EEPROM.get(WAKE_UP_TIME_WINDOW_EREG, wakeUpTimeWindow);
@@ -572,8 +582,8 @@ void loop() {
   slave->poll();
   if (powerMode == 1) {
     lowPowerRS485();
-    uint16_t sleepTime = Watchdog.sleep(8000);
+    Watchdog.sleep(8000);
     receiveRS485();
-    for (uint16_t start = millis(); millis() - start < wakeUpTimeWindow;) slave->poll();
+    for (uint16_t start = millis(); (uint16_t)(millis() - start) < wakeUpTimeWindow;) slave->poll();
   }
 }
