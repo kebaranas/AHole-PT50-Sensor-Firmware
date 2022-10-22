@@ -173,16 +173,19 @@ Modbus *slave;
 
 void (*reset) (void) = 0;
 
+// Set the RS485 to transmit mode.
 void transmitRS485() {
   digitalWrite(RE_PIN, HIGH);
   digitalWrite(DE_PIN, HIGH);
 }
 
+// Set the RS485 to receive mode.
 void receiveRS485() {
   digitalWrite(RE_PIN, LOW);
   digitalWrite(DE_PIN, LOW);
 }
 
+// Set the RS485 to low power mode.
 void lowPowerRS485() {
   digitalWrite(RE_PIN, HIGH);
   digitalWrite(DE_PIN, LOW);
@@ -247,7 +250,7 @@ uint32_t getActualBaudRate(uint8_t baudRateIdentifier) {
   return realBaudRate;
 }
 
-// Serial print through RS485
+// Serial print through RS485.
 size_t logRS485(const char *message) {
   transmitRS485();
   size_t n = Serial.println(message);
@@ -255,7 +258,7 @@ size_t logRS485(const char *message) {
   return n;
 }
 
-// Read data from the coils
+// Read data from the coils.
 uint8_t readCoil(uint8_t fc, uint16_t address, uint16_t length) {
   if (fc == FC_READ_COILS) {
     for (uint16_t i = 0; i < length; i++) {
@@ -539,6 +542,7 @@ uint8_t writeRegister(uint8_t fc, uint16_t address, uint16_t length) {
   return STATUS_OK;
 }
 
+// Initialize the basic functions of the sensor.
 void setup() {
   // Disable unused features
   ADCSRA = 0;
@@ -578,6 +582,7 @@ void setup() {
   slave->cbVector[CB_WRITE_MULTIPLE_REGISTERS] = writeRegister;
 }
 
+// Wait for polls from the RS485. 
 void loop() {  
   slave->poll();
   if (powerMode == 1) {
