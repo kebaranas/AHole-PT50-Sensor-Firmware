@@ -1,5 +1,6 @@
 # AHolePT Sensor Firmware
 Dependencies:
-- Arduino Library
-- BlueRobotics MS5837 (edited)
-- ModbusSlave (edited)
+- Arduino library
+- Adafruit Sleepy Dog library
+- BlueRobotics MS5837 library (customized)
+- ModbusSlave library (customized)
