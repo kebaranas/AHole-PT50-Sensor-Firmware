@@ -1,4 +1,4 @@
-# AHolePT Sensor Firmware
+# AHole-PT50 Sensor Firmware
 Dependencies:
 - Arduino library
 - Adafruit Sleepy Dog library
